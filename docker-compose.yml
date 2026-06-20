@@ -1,0 +1,53 @@
+version: "3.9"
+
+# Local/staging stack: Redis + FastAPI backend + a static build of the React
+# frontend served by Nginx. For a "real" production deploy, see the
+# Vercel/Railway or AWS notes in README.md instead — this compose file is
+# aimed at running the whole thing on a single box (or for local dev parity).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked in at build time since this is a static SPA build — point
+        # this at wherever `backend` is actually reachable from the browser
+        # (not from inside the Docker network) in your deployment.
+        VITE_API_BASE_URL: http://localhost:8000
+        VITE_WS_URL: ws://localhost:8000/ws/option-chain
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  redis-data:
